@@ -159,6 +159,8 @@ class IndexedDocument(BaseModel):
     indexed_at: datetime = Field(description="When the document was indexed")
     file_path: Optional[str] = Field(default=None, description="Path to source file")
     file_type: Optional[str] = Field(default=None, description="File type (pdf, epub)")
+    authors: Optional[list[str]] = Field(default=None, description="Authors of the document")
+    year: Optional[int] = Field(default=None, description="Publication year")
 
 
 class SearchResult(BaseModel):
@@ -244,6 +246,16 @@ class SemanticSearchRequest(BaseModel):
         default=None, description="Filter by chunk types"
     )
     min_score: float = Field(default=0.0, description="Minimum similarity score threshold")
+    year_from: Optional[int] = Field(
+        default=None, description="Filter to items published in or after this year"
+    )
+    year_to: Optional[int] = Field(
+        default=None, description="Filter to items published in or before this year"
+    )
+    authors: Optional[list[str]] = Field(
+        default=None,
+        description="Filter to items by these authors (substring match on names)",
+    )
 
 
 class GetChunkContextRequest(BaseModel):

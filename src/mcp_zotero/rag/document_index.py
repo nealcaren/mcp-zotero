@@ -55,13 +55,9 @@ class DocumentIndex:
                 ON documents(content_hash)
             """)
 
-    def get_document(self, item_key: str) -> Optional[IndexedDocument]:
-        cursor = self.connection.execute(
-            "SELECT * FROM documents WHERE item_key = ?", (item_key,)
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
+    def _row_to_document(self, row) -> IndexedDocument:
+        """Convert a DB row to IndexedDocument, parsing metadata JSON."""
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
         return IndexedDocument(
             item_key=row["item_key"],
             title=row["title"],
@@ -70,7 +66,18 @@ class DocumentIndex:
             indexed_at=datetime.fromisoformat(row["indexed_at"]),
             file_path=row["file_path"],
             file_type=row["file_type"],
+            authors=meta.get("authors"),
+            year=meta.get("year"),
         )
+
+    def get_document(self, item_key: str) -> Optional[IndexedDocument]:
+        cursor = self.connection.execute(
+            "SELECT * FROM documents WHERE item_key = ?", (item_key,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_document(row)
 
     def get_content_hash(self, item_key: str) -> Optional[str]:
         cursor = self.connection.execute(
@@ -123,6 +130,8 @@ class DocumentIndex:
             indexed_at=indexed_at,
             file_path=file_path,
             file_type=file_type,
+            authors=metadata.get("authors") if metadata else None,
+            year=metadata.get("year") if metadata else None,
         )
 
     def store_extracted_text(
@@ -167,18 +176,44 @@ class DocumentIndex:
         )
         documents = []
         for row in cursor:
-            documents.append(
-                IndexedDocument(
-                    item_key=row["item_key"],
-                    title=row["title"],
-                    content_hash=row["content_hash"],
-                    chunk_count=row["chunk_count"],
-                    indexed_at=datetime.fromisoformat(row["indexed_at"]),
-                    file_path=row["file_path"],
-                    file_type=row["file_type"],
-                )
-            )
+            documents.append(self._row_to_document(row))
         return documents
+
+    def get_item_keys_by_metadata(
+        self,
+        year_from: Optional[int] = None,
+        year_to: Optional[int] = None,
+        authors: Optional[list[str]] = None,
+    ) -> Optional[list[str]]:
+        """Return item_keys matching metadata filters. Returns None if no filters."""
+        if not any([year_from, year_to, authors]):
+            return None
+
+        cursor = self.connection.execute(
+            "SELECT item_key, metadata FROM documents"
+        )
+        matching = []
+        for row in cursor:
+            meta = json.loads(row["metadata"]) if row["metadata"] else {}
+            year = meta.get("year")
+            authors_list = meta.get("authors", [])
+
+            if year_from and (not year or year < year_from):
+                continue
+            if year_to and (not year or year > year_to):
+                continue
+            if authors:
+                authors_lower = [q.lower() for q in authors]
+                found = any(
+                    any(q in a.lower() for a in authors_list)
+                    for q in authors_lower
+                )
+                if not found:
+                    continue
+
+            matching.append(row["item_key"])
+
+        return matching
 
     def get_stats(self) -> dict:
         cursor = self.connection.execute("""

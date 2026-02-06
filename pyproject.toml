@@ -7,7 +7,7 @@ packages = ["src/mcp_zotero"]
 
 [project]
 name = "mcp-zotero"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server for Zotero — library tools + optional semantic search"
 readme = "README.md"
 license = "MIT"

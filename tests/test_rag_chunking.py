@@ -140,3 +140,189 @@ class TestExtractionQualityWarnings:
         # Should still flag very_short, but not low_density
         assert any("very_short" in w for w in warnings)
         assert not any("low_density" in w for w in warnings)
+
+
+class TestDocumentIndexMetadata:
+    """Tests for metadata storage and retrieval in DocumentIndex."""
+
+    def _make_index(self, tmp_path):
+        from mcp_zotero.rag.document_index import DocumentIndex
+
+        return DocumentIndex(tmp_path / "test.db")
+
+    def test_add_and_get_with_metadata(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="K1",
+            title="Housing Instability",
+            content_hash="abc",
+            chunk_count=5,
+            metadata={"authors": ["Jane Smith", "Bob Jones"], "year": 2020},
+        )
+        doc = idx.get_document("K1")
+        assert doc is not None
+        assert doc.authors == ["Jane Smith", "Bob Jones"]
+        assert doc.year == 2020
+
+    def test_get_without_metadata(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="K2",
+            title="Old Item",
+            content_hash="def",
+            chunk_count=3,
+        )
+        doc = idx.get_document("K2")
+        assert doc is not None
+        assert doc.authors is None
+        assert doc.year is None
+
+    def test_list_documents_with_metadata(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="K3",
+            title="Paper A",
+            content_hash="ghi",
+            chunk_count=2,
+            metadata={"authors": ["Alice"], "year": 2015},
+        )
+        docs = idx.list_documents()
+        assert len(docs) == 1
+        assert docs[0].authors == ["Alice"]
+        assert docs[0].year == 2015
+
+    def test_filter_by_year(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="Y1", title="Early", content_hash="a", chunk_count=1,
+            metadata={"authors": ["A"], "year": 2010},
+        )
+        idx.add_document(
+            item_key="Y2", title="Middle", content_hash="b", chunk_count=1,
+            metadata={"authors": ["B"], "year": 2018},
+        )
+        idx.add_document(
+            item_key="Y3", title="Late", content_hash="c", chunk_count=1,
+            metadata={"authors": ["C"], "year": 2023},
+        )
+
+        keys = idx.get_item_keys_by_metadata(year_from=2015, year_to=2020)
+        assert keys == ["Y2"]
+
+        keys = idx.get_item_keys_by_metadata(year_from=2018)
+        assert set(keys) == {"Y2", "Y3"}
+
+        keys = idx.get_item_keys_by_metadata(year_to=2010)
+        assert keys == ["Y1"]
+
+    def test_filter_by_author(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="A1", title="Paper 1", content_hash="a", chunk_count=1,
+            metadata={"authors": ["Jane Smith", "Bob Jones"], "year": 2020},
+        )
+        idx.add_document(
+            item_key="A2", title="Paper 2", content_hash="b", chunk_count=1,
+            metadata={"authors": ["Alice Brown"], "year": 2019},
+        )
+
+        keys = idx.get_item_keys_by_metadata(authors=["Smith"])
+        assert keys == ["A1"]
+
+        keys = idx.get_item_keys_by_metadata(authors=["jones"])
+        assert keys == ["A1"]  # case-insensitive
+
+        keys = idx.get_item_keys_by_metadata(authors=["Nobody"])
+        assert keys == []
+
+    def test_filter_no_filters_returns_none(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        result = idx.get_item_keys_by_metadata()
+        assert result is None
+
+    def test_filter_skips_null_metadata(self, tmp_path):
+        idx = self._make_index(tmp_path)
+        idx.add_document(
+            item_key="N1", title="No Meta", content_hash="a", chunk_count=1,
+        )
+        idx.add_document(
+            item_key="N2", title="With Meta", content_hash="b", chunk_count=1,
+            metadata={"authors": ["Smith"], "year": 2020},
+        )
+        keys = idx.get_item_keys_by_metadata(year_from=2019)
+        assert keys == ["N2"]
+
+
+class TestCitationFormatting:
+    """Tests for the citation string builder used in semantic_search."""
+
+    def _build_citation(self, authors, year):
+        """Reproduce the citation logic from tools.py."""
+        parts = []
+        if authors:
+            if len(authors) == 1:
+                parts.append(authors[0].split()[-1])
+            elif len(authors) == 2:
+                parts.append(" & ".join(a.split()[-1] for a in authors))
+            else:
+                parts.append(f"{authors[0].split()[-1]} et al.")
+        if year:
+            parts.append(str(year))
+        return ", ".join(parts) if parts else None
+
+    def test_single_author(self):
+        assert self._build_citation(["Jane Smith"], 2020) == "Smith, 2020"
+
+    def test_two_authors(self):
+        assert self._build_citation(
+            ["Jane Smith", "Bob Jones"], 2020
+        ) == "Smith & Jones, 2020"
+
+    def test_three_authors(self):
+        assert self._build_citation(
+            ["Jane Smith", "Bob Jones", "Alice Brown"], 2020
+        ) == "Smith et al., 2020"
+
+    def test_no_year(self):
+        assert self._build_citation(["Jane Smith"], None) == "Smith"
+
+    def test_no_authors(self):
+        assert self._build_citation([], 2020) == "2020"
+
+    def test_no_authors_no_year(self):
+        assert self._build_citation([], None) is None
+
+    def test_none_authors(self):
+        assert self._build_citation(None, 2020) == "2020"
+
+
+class TestYearExtraction:
+    """Tests for year extraction from Zotero date strings."""
+
+    def _extract_year(self, date_str):
+        import re
+        if not date_str:
+            return None
+        match = re.search(r"\b((?:19|20)\d{2})\b", date_str)
+        return int(match.group(1)) if match else None
+
+    def test_year_only(self):
+        assert self._extract_year("2020") == 2020
+
+    def test_full_date(self):
+        assert self._extract_year("2015-03-01") == 2015
+
+    def test_month_year(self):
+        assert self._extract_year("March 2018") == 2018
+
+    def test_empty(self):
+        assert self._extract_year("") is None
+
+    def test_none(self):
+        assert self._extract_year(None) is None
+
+    def test_no_year_in_string(self):
+        assert self._extract_year("undated") is None
+
+    def test_old_year(self):
+        assert self._extract_year("1995") == 1995

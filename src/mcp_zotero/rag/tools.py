@@ -5,6 +5,7 @@ Registration happens via register_rag_tools(mcp) called from rag/__init__.py.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
@@ -118,12 +119,21 @@ class _ZoteroRAGClient:
                 if name:
                     authors.append(name)
 
+        # Extract year from date field
+        date_str = data.get("date", "")
+        year = None
+        if date_str:
+            match = re.search(r"\b((?:19|20)\d{2})\b", date_str)
+            if match:
+                year = int(match.group(1))
+
         return {
             "key": data.get("key") or item.get("key"),
             "title": data.get("title", "Untitled"),
             "authors": authors,
             "authors_str": "; ".join(authors) if authors else None,
             "item_type": data.get("itemType"),
+            "year": year,
         }
 
     def iter_items_with_attachments(
@@ -249,6 +259,12 @@ def register_rag_tools(mcp) -> None:
                         chunk_count=len(chunk_result.chunks),
                         file_path=str(file_path),
                         file_type=file_type,
+                        metadata={
+                            "authors": metadata["authors"],
+                            "authors_str": metadata["authors_str"],
+                            "year": metadata.get("year"),
+                            "item_type": metadata.get("item_type"),
+                        },
                     )
                     doc_index.store_extracted_text(
                         item_key, content_hash, extraction.lines
@@ -341,6 +357,12 @@ def register_rag_tools(mcp) -> None:
                     chunk_count=len(chunk_result.chunks),
                     file_path=str(file_path),
                     file_type=file_type,
+                    metadata={
+                        "authors": metadata["authors"],
+                        "authors_str": metadata["authors_str"],
+                        "year": metadata.get("year"),
+                        "item_type": metadata.get("item_type"),
+                    },
                 )
                 doc_index.store_extracted_text(item_key, content_hash, extraction.lines)
                 indexed += 1
@@ -380,12 +402,28 @@ def register_rag_tools(mcp) -> None:
         if req.chunk_types:
             chunk_type_enums = [ChunkType(ct) for ct in req.chunk_types]
 
+        # Pre-filter by year/author metadata
+        meta_keys = doc_index.get_item_keys_by_metadata(
+            year_from=req.year_from,
+            year_to=req.year_to,
+            authors=req.authors,
+        )
+        if meta_keys is not None:
+            if req.item_keys:
+                effective_keys = list(set(req.item_keys) & set(meta_keys))
+            else:
+                effective_keys = meta_keys
+            if not effective_keys:
+                return {"query": req.query, "results": [], "total_results": 0}
+        else:
+            effective_keys = req.item_keys
+
         query_embedding = encoder.encode_query(req.query)
 
         results = vector_store.search(
             query_embedding=query_embedding,
             limit=req.limit,
-            item_keys=req.item_keys,
+            item_keys=effective_keys,
             chunk_types=chunk_type_enums,
             min_score=req.min_score,
         )
@@ -396,10 +434,31 @@ def register_rag_tools(mcp) -> None:
         formatted = []
         for chunk, score in results:
             doc = doc_index.get_document(chunk.item_key)
+
+            # Build citation string
+            citation = None
+            if doc:
+                parts = []
+                if doc.authors:
+                    if len(doc.authors) == 1:
+                        parts.append(doc.authors[0].split()[-1])
+                    elif len(doc.authors) == 2:
+                        parts.append(
+                            " & ".join(a.split()[-1] for a in doc.authors)
+                        )
+                    else:
+                        parts.append(f"{doc.authors[0].split()[-1]} et al.")
+                if doc.year:
+                    parts.append(str(doc.year))
+                citation = ", ".join(parts) if parts else None
+
             formatted.append(
                 {
                     "score": round(score, 3),
                     "source": doc.title if doc else "Unknown",
+                    "citation": citation,
+                    "authors": doc.authors if doc else None,
+                    "year": doc.year if doc else None,
                     "item_key": chunk.item_key,
                     "chunk_id": chunk.chunk_id,
                     "section": chunk.section_title,
