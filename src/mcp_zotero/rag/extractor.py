@@ -13,8 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-import fitz  # pymupdf
-
 logger = logging.getLogger(__name__)
 
 # Characters-per-page threshold — below this, PDF is likely scanned
@@ -105,6 +103,8 @@ class PdfExtractor:
 
     def _extract_pymupdf(self, file_path: Path, content_hash: str) -> ExtractionResult:
         try:
+            import fitz  # pymupdf
+
             doc = fitz.open(str(file_path))
             pages = []
             for page in doc:

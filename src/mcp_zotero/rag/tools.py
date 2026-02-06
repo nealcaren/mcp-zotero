@@ -4,8 +4,6 @@ These tools are only available when mcp-zotero[rag] is installed.
 Registration happens via register_rag_tools(mcp) called from rag/__init__.py.
 """
 
-from __future__ import annotations
-
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
