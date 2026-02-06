@@ -84,3 +84,59 @@ class TestGetChunker:
         chunker = get_chunker(chunk_size=256, chunk_overlap=32)
         assert chunker.chunk_size == 256
         assert chunker.chunk_overlap == 32
+
+
+class TestExtractionQualityWarnings:
+    def test_normal_extraction_no_warnings(self):
+        text = "This is a normal academic paper. " * 100
+        result = ExtractionResult(
+            text=text, lines=text.split("\n"), content_hash="h1", page_count=10
+        )
+        assert result.quality_warnings() == []
+
+    def test_empty_text(self):
+        result = ExtractionResult(text="", lines=[], content_hash="h2", page_count=5)
+        warnings = result.quality_warnings()
+        assert len(warnings) == 1
+        assert "no_text" in warnings[0]
+
+    def test_scanned_pdf_low_density(self):
+        # 10 pages, only 50 chars total -> 5 chars/page
+        result = ExtractionResult(
+            text="Title line\nAuthor line",
+            lines=["Title line", "Author line"],
+            content_hash="h3",
+            page_count=10,
+        )
+        warnings = result.quality_warnings()
+        assert any("low_density" in w for w in warnings)
+
+    def test_very_short_text(self):
+        result = ExtractionResult(
+            text="Fig. S1a. Mediation model.",
+            lines=["Fig. S1a. Mediation model."],
+            content_hash="h4",
+            page_count=1,
+        )
+        warnings = result.quality_warnings()
+        assert any("very_short" in w for w in warnings)
+
+    def test_mostly_blank_lines(self):
+        lines = ["Title"] + [""] * 80 + ["Caption"]
+        result = ExtractionResult(
+            text="\n".join(lines),
+            lines=lines,
+            content_hash="h5",
+            page_count=1,
+        )
+        warnings = result.quality_warnings()
+        assert any("mostly_blank" in w for w in warnings)
+
+    def test_no_page_count_skips_density_check(self):
+        result = ExtractionResult(
+            text="Short text.", lines=["Short text."], content_hash="h6"
+        )
+        warnings = result.quality_warnings()
+        # Should still flag very_short, but not low_density
+        assert any("very_short" in w for w in warnings)
+        assert not any("low_density" in w for w in warnings)

@@ -196,6 +196,7 @@ def register_rag_tools(mcp) -> None:
         indexed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[Dict[str, Any]] = []
 
         try:
             for item, file_path, file_type in zot.iter_items_with_attachments(
@@ -216,6 +217,14 @@ def register_rag_tools(mcp) -> None:
                         continue
 
                     extraction = extractor.extract(file_path)
+
+                    ext_warnings = extraction.quality_warnings()
+                    if ext_warnings:
+                        warnings.append({
+                            "item_key": item_key,
+                            "title": metadata["title"],
+                            "issues": ext_warnings,
+                        })
 
                     chunker = get_chunker(
                         metadata.get("item_type"),
@@ -250,13 +259,15 @@ def register_rag_tools(mcp) -> None:
                 except Exception as e:
                     errors.append(f"{item_key}: {e}")
 
-            result = {
+            result: Dict[str, Any] = {
                 "indexed": indexed,
                 "skipped": skipped,
                 "errors": len(errors),
             }
             if errors:
                 result["error_details"] = errors[:10]
+            if warnings:
+                result["warnings"] = warnings
             return result
 
         except Exception as e:
@@ -270,6 +281,7 @@ def register_rag_tools(mcp) -> None:
         indexed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[Dict[str, Any]] = []
 
         for item_key in req.item_keys:
             try:
@@ -297,6 +309,15 @@ def register_rag_tools(mcp) -> None:
                     continue
 
                 extraction = extractor.extract(file_path)
+
+                ext_warnings = extraction.quality_warnings()
+                if ext_warnings:
+                    warnings.append({
+                        "item_key": item_key,
+                        "title": metadata["title"],
+                        "issues": ext_warnings,
+                    })
+
                 chunker = get_chunker(
                     metadata.get("item_type"),
                     chunk_size=settings.rag_chunk_size,
@@ -327,9 +348,11 @@ def register_rag_tools(mcp) -> None:
             except Exception as e:
                 errors.append(f"{item_key}: {e}")
 
-        result = {"indexed": indexed, "skipped": skipped, "errors": len(errors)}
+        result: Dict[str, Any] = {"indexed": indexed, "skipped": skipped, "errors": len(errors)}
         if errors:
             result["error_details"] = errors
+        if warnings:
+            result["warnings"] = warnings
         return result
 
     @mcp.tool()

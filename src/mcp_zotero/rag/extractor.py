@@ -38,6 +38,39 @@ class ExtractionResult:
     def get_lines(self, start: int, end: int) -> str:
         return "\n".join(self.lines[start:end])
 
+    def quality_warnings(self) -> list[str]:
+        """Check extracted text for quality issues. Returns list of warnings."""
+        warnings = []
+        text_len = len(self.text.strip())
+
+        if text_len == 0:
+            warnings.append("no_text: PDF produced no extractable text (likely scanned)")
+            return warnings
+
+        if self.page_count and self.page_count > 0:
+            cpp = text_len / self.page_count
+            if cpp < _SCANNED_THRESHOLD:
+                warnings.append(
+                    f"low_density: {cpp:.0f} chars/page (likely scanned, needs OCR)"
+                )
+
+        if text_len < 500:
+            warnings.append(
+                f"very_short: only {text_len} chars extracted"
+                " (may be supplementary material)"
+            )
+
+        if self.lines:
+            blank = sum(1 for line in self.lines if not line.strip())
+            ratio = blank / len(self.lines)
+            if ratio > 0.8 and len(self.lines) > 10:
+                warnings.append(
+                    f"mostly_blank: {ratio:.0%} blank lines"
+                    " (possible extraction failure)"
+                )
+
+        return warnings
+
 
 class ExtractionError(Exception):
     def __init__(self, message: str, file_path: Optional[Path] = None):
