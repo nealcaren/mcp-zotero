@@ -31,6 +31,11 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nealcaren/mcp-zotero"
+Repository = "https://github.com/nealcaren/mcp-zotero"
+Issues = "https://github.com/nealcaren/mcp-zotero/issues"
+
 [project.optional-dependencies]
 rag = [
     "sentence-transformers>=2.2.0",
